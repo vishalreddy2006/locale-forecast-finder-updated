@@ -356,8 +356,154 @@ const Index = () => {
   };
 
   const handleDownloadPDF = () => {
-    toast.success("Downloading weather report as PDF...");
-    // PDF download functionality will be implemented later
+    if (!weatherData) {
+      toast.error("No weather data to download");
+      return;
+    }
+
+    try {
+      // Create a printable HTML report
+      const reportWindow = window.open('', '_blank');
+      if (!reportWindow) {
+        toast.error("Please allow popups to download PDF");
+        return;
+      }
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Weather Report - ${weatherData.city || weatherData.location}</title>
+          <style>
+            @media print {
+              @page { margin: 0.5in; }
+              body { margin: 0; }
+            }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              max-width: 800px;
+              margin: 20px auto;
+              padding: 20px;
+              line-height: 1.6;
+              color: #333;
+            }
+            h1 { color: #2563eb; margin-bottom: 10px; }
+            h2 { color: #1e40af; margin-top: 30px; border-bottom: 2px solid #2563eb; padding-bottom: 5px; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .current { background: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .location { font-size: 14px; color: #666; margin-top: 5px; }
+            .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 15px 0; }
+            .item { padding: 10px; background: #f8fafc; border-left: 3px solid #2563eb; }
+            .label { font-weight: 600; color: #1e40af; }
+            .forecast-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin: 20px 0; }
+            .day-card { background: #f1f5f9; padding: 15px; border-radius: 6px; text-align: center; }
+            .day-card strong { display: block; color: #1e40af; margin-bottom: 10px; }
+            .tips { background: #fef3c7; padding: 15px; border-radius: 6px; margin: 20px 0; }
+            .tips ul { margin: 10px 0; padding-left: 20px; }
+            .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #cbd5e1; color: #64748b; font-size: 12px; }
+            .print-btn { 
+              display: block; 
+              margin: 20px auto; 
+              padding: 12px 30px; 
+              background: #2563eb; 
+              color: white; 
+              border: none; 
+              border-radius: 6px; 
+              cursor: pointer;
+              font-size: 16px;
+            }
+            .print-btn:hover { background: #1d4ed8; }
+            @media print { .print-btn { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>🌤️ Weather Report</h1>
+            <div class="location">
+              ${weatherData.city ? `${weatherData.city}${weatherData.state ? ', ' + weatherData.state : ''}${weatherData.country ? ', ' + weatherData.country : ''}` : weatherData.location}
+              ${weatherData.postcode ? ` · ${weatherData.postcode}` : ''}
+            </div>
+            <div class="location">${weatherData.localTime || new Date().toLocaleString()}</div>
+          </div>
+
+          <div class="current">
+            <h2>Current Weather</h2>
+            <div class="grid">
+              <div class="item">
+                <div class="label">Temperature</div>
+                <div>${Math.round(isCelsius ? weatherData.temperature : (weatherData.temperature * 9/5) + 32)}°${isCelsius ? 'C' : 'F'}</div>
+              </div>
+              <div class="item">
+                <div class="label">Condition</div>
+                <div>${weatherData.condition}</div>
+              </div>
+              <div class="item">
+                <div class="label">Humidity</div>
+                <div>${weatherData.humidity}%</div>
+              </div>
+              <div class="item">
+                <div class="label">Wind Speed</div>
+                <div>${weatherData.windSpeedKmh} km/h</div>
+              </div>
+            </div>
+          </div>
+
+          <h2>7-Day Forecast</h2>
+          <div class="forecast-grid">
+            ${forecast.map(day => `
+              <div class="day-card">
+                <strong>${day.day}</strong>
+                <div>${Math.round(isCelsius ? day.temperature : (day.temperature * 9/5) + 32)}°${isCelsius ? 'C' : 'F'}</div>
+                <div style="font-size: 12px; color: #64748b; margin-top: 5px;">${day.condition}</div>
+              </div>
+            `).join('')}
+          </div>
+
+          ${aiTipsEnabled && aiTips.length > 0 ? `
+            <div class="tips">
+              <h2 style="margin-top: 0;">AI Weather Tips</h2>
+              <ul>
+                ${aiTips.map(tip => `<li>${tip}</li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+
+          ${aiAnalyzerEnabled && aiAnalysis ? `
+            <div class="tips" style="background: #e0f2fe;">
+              <h2 style="margin-top: 0;">AI Analysis</h2>
+              <p><strong>Trend:</strong> ${aiAnalysis.trend}</p>
+              ${aiAnalysis.rainRisk ? `<p><strong>Rain Risk:</strong> ${aiAnalysis.rainRisk}</p>` : ''}
+              ${aiAnalysis.humidityWarning ? `<p><strong>Humidity:</strong> ${aiAnalysis.humidityWarning}</p>` : ''}
+              <p><strong>Recommendation:</strong> ${aiAnalysis.recommendation}</p>
+            </div>
+          ` : ''}
+
+          <div class="footer">
+            <p>Generated by Sky Watch Pro</p>
+            <p>Data sources: Open-Meteo, OSM Nominatim, BigDataCloud</p>
+            <p>Report generated on ${new Date().toLocaleString()}</p>
+          </div>
+
+          <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+
+          <script>
+            // Auto-focus print dialog after a short delay
+            setTimeout(() => {
+              // Don't auto-print, let user click the button
+            }, 500);
+          </script>
+        </body>
+        </html>
+      `;
+
+      reportWindow.document.write(html);
+      reportWindow.document.close();
+      toast.success("Weather report opened! Click 'Print/Save as PDF' button.");
+    } catch (error) {
+      toast.error("Failed to generate report. Please try again.");
+      if (IS_DEV) console.error("PDF generation error:", error);
+    }
   };
 
   const handleThemeChange = (newTheme: "light" | "dark" | "system") => {
