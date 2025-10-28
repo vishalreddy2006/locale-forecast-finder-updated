@@ -35,8 +35,10 @@ Fill in the following settings:
 | **Region** | Choose closest to you (e.g., `Singapore` for Asia) |
 | **Branch** | `main` |
 | **Root Directory** | *(leave blank)* |
-| **Build Command** | `npm install && npm run build` |
+| **Build Command** | `bun install && bun run build` |
 | **Publish Directory** | `dist` |
+
+> **Note**: Bun is **3-5x faster** than npm and works perfectly on Render! If you prefer npm, use: `npm install && npm run build`
 
 ### Step 4: Environment Variables
 
