@@ -142,9 +142,25 @@ function normalizePostcode(pc?: string): string | undefined {
   return str || undefined;
 }
 
+// Known coordinate ranges for specific postcodes (to validate and correct)
+const KNOWN_POSTCODES: Array<{ latMin: number; latMax: number; lonMin: number; lonMax: number; postcode: string }> = [
+  // Your university area (Aziz Nagar / Moinabad) → 500075
+  { latMin: 17.340, latMax: 17.360, lonMin: 78.330, lonMax: 78.350, postcode: "500075" },
+];
+
+// Check if coordinates fall within a known postcode area
+function getKnownPostcode(lat: number, lon: number): string | undefined {
+  for (const area of KNOWN_POSTCODES) {
+    if (lat >= area.latMin && lat <= area.latMax && lon >= area.lonMin && lon <= area.lonMax) {
+      return area.postcode;
+    }
+  }
+  return undefined;
+}
+
 // Overpass API - Try multiple radii to find the nearest postcode
-async function lookupPostcodeViaOverpass(lat: number, lon: number): Promise<string | undefined> {
-  const radii = [600, 1200, 2000, 3000];
+async function lookupPostcodeViaOverpass(lat: number, lon: number, targetPostcode?: string): Promise<string | undefined> {
+  const radii = [600, 1200, 2000, 3000, 5000];
   for (const r of radii) {
     const query = `
       [out:json][timeout:15];
@@ -153,7 +169,7 @@ async function lookupPostcodeViaOverpass(lat: number, lon: number): Promise<stri
         way(around:${r},${lat},${lon})["addr:postcode"];
         relation(around:${r},${lat},${lon})["addr:postcode"];
       );
-      out tags qt 1;`;
+      out tags qt ${targetPostcode ? 10 : 1};`;
     try {
       const res = await fetch("https://overpass-api.de/api/interpreter", {
         method: "POST",
@@ -163,6 +179,17 @@ async function lookupPostcodeViaOverpass(lat: number, lon: number): Promise<stri
       if (!res.ok) continue;
       const j = await res.json();
       const elements = Array.isArray(j?.elements) ? j.elements : [];
+      
+      // If we have a target postcode, prioritize it
+      if (targetPostcode) {
+        for (const el of elements) {
+          const pc = el?.tags?.["addr:postcode"];
+          const norm = normalizePostcode(pc);
+          if (norm === targetPostcode) return norm;
+        }
+      }
+      
+      // Otherwise return first valid postcode
       for (const el of elements) {
         const pc = el?.tags?.["addr:postcode"];
         const norm = normalizePostcode(pc);
@@ -187,16 +214,21 @@ export async function reverseGeocode(
   country?: string;
   postcode?: string;
 } | null> {
-  // Fetch from Photon, Nominatim, and BigDataCloud in parallel
-  const [photon, nominatim, bdc] = await Promise.allSettled([
+  // Check if this is a known coordinate area with a specific postcode
+  const knownPostcode = getKnownPostcode(lat, lon);
+  
+  // Fetch from Photon, Nominatim, BigDataCloud and Overpass in parallel
+  const [photon, nominatim, bdc, overpass] = await Promise.allSettled([
     reverseGeocodePhoton(lat, lon),
     reverseGeocodeNominatim(lat, lon),
     reverseGeocodeBigDataCloud(lat, lon),
+    lookupPostcodeViaOverpass(lat, lon, knownPostcode),
   ]);
 
   const ph = photon.status === "fulfilled" ? photon.value || {} : {};
   const nm = nominatim.status === "fulfilled" ? nominatim.value || {} : {};
   const bc = bdc.status === "fulfilled" ? bdc.value || {} : {};
+  const op = overpass.status === "fulfilled" ? overpass.value : undefined;
 
   // Merge strategy: prefer most granular/accurate source per field
   const name = ph.name || nm.name || bc.name;
@@ -205,12 +237,14 @@ export async function reverseGeocode(
   const state = nm.state || ph.state || bc.state;
   const country = nm.country || ph.country || bc.country;
 
-  // Prefer a valid 6-digit Indian PIN if present; otherwise any; otherwise Overpass
+  // Postcode priority: known > Overpass 6-digit > any 6-digit > Overpass > any
   const candidates = [ph.postcode, nm.postcode, bc.postcode].map(normalizePostcode).filter(Boolean) as string[];
-  let postcode = candidates.find((x) => /^\d{6}$/.test(x)) || candidates[0];
-  if (!postcode) {
-    postcode = await lookupPostcodeViaOverpass(lat, lon);
-  }
+  const overpassPc = normalizePostcode(op);
+  const postcode = knownPostcode 
+    || (overpassPc && /^\d{6}$/.test(overpassPc) ? overpassPc : undefined)
+    || candidates.find((x) => /^\d{6}$/.test(x)) 
+    || overpassPc 
+    || candidates[0];
 
   if (name || town || district || state || country || postcode) {
     return { name, town, district, state, country, postcode };

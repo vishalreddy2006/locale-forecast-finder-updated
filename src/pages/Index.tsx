@@ -7,9 +7,11 @@ import SearchBar from "@/components/SearchBar";
 import SettingsPanel from "@/components/SettingsPanel";
 import AITipsCard from "@/components/AITipsCard";
 import AIAnalyzerCard from "@/components/AIAnalyzerCard";
-import { Loader2 } from "lucide-react";
+import { Loader2, MapPin, Trash2 } from "lucide-react";
 import { getCurrentWeather, getSevenDayForecastWithMeta, forwardGeocode, ipGeolocation } from "@/lib/weather";
-import type { CurrentWeather, DailyForecast } from "@/lib/weather";
+import type { CurrentWeather, DailyForecast, SavedLocation } from "@/lib/weather";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 // WeatherData is essentially CurrentWeather without lat/lon (used for state)
 type WeatherData = Omit<CurrentWeather, 'lat' | 'lon'>;
@@ -54,6 +56,7 @@ const Index = () => {
   const [locationSource, setLocationSource] = useState<'geolocation'|'ip'|'search'|'saved' | null>(null);
   const [autoRefreshIntervalMin, setAutoRefreshIntervalMin] = useState<number>(5);
   const [isForecastFallback, setIsForecastFallback] = useState<boolean>(false);
+  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
 
   // Derived AI content from live data
   const aiTips = useMemo(() => {
@@ -327,6 +330,17 @@ const Index = () => {
       }
     };
     loadSavedLocation();
+    
+    // Load saved locations list
+    try {
+      const savedRaw = localStorage.getItem("savedWeatherLocations");
+      if (savedRaw) {
+        const locations = JSON.parse(savedRaw) as SavedLocation[];
+        setSavedLocations(locations);
+      }
+    } catch (err) {
+      if (IS_DEV) console.warn('Saved locations load error:', err);
+    }
   }, [fetchWeatherData]);
 
   const convertTemperature = (temp: number) => {
@@ -514,12 +528,63 @@ const Index = () => {
     toast.success(`Theme changed to ${newTheme}`);
   };
 
+  const handleSaveLocation = () => {
+    if (!weatherData || !lastCoords) {
+      toast.error("No location to save");
+      return;
+    }
+
+    const locationName = weatherData.town || weatherData.city || weatherData.location || "Unnamed Location";
+    const newLocation: SavedLocation = {
+      id: `${lastCoords.lat}-${lastCoords.lon}-${Date.now()}`,
+      name: locationName,
+      lat: lastCoords.lat,
+      lon: lastCoords.lon,
+      town: weatherData.town,
+      district: weatherData.district,
+      state: weatherData.state,
+      country: weatherData.country,
+      postcode: weatherData.postcode,
+      savedAt: Date.now(),
+    };
+
+    try {
+      const updated = [...savedLocations, newLocation];
+      setSavedLocations(updated);
+      localStorage.setItem("savedWeatherLocations", JSON.stringify(updated));
+      toast.success(`Saved "${locationName}"`);
+    } catch (err) {
+      toast.error("Failed to save location");
+      if (IS_DEV) console.error("Save location error:", err);
+    }
+  };
+
+  const handleLoadSavedLocation = async (location: SavedLocation) => {
+    setLastCoords({ lat: location.lat, lon: location.lon });
+    setLocationSource('saved');
+    setLoading(true);
+    await fetchWeatherData(location.lat, location.lon);
+  };
+
+  const handleDeleteSavedLocation = (id: string) => {
+    try {
+      const updated = savedLocations.filter((loc) => loc.id !== id);
+      setSavedLocations(updated);
+      localStorage.setItem("savedWeatherLocations", JSON.stringify(updated));
+      toast.success("Location deleted");
+    } catch (err) {
+      toast.error("Failed to delete location");
+      if (IS_DEV) console.error("Delete location error:", err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-12 h-12 animate-spin text-primary" />
           <p className="text-lg text-muted-foreground">Loading weather data...</p>
+          <p className="text-sm text-muted-foreground/70">Fetching precise location & 7-day forecast</p>
         </div>
       </div>
     );
@@ -564,22 +629,35 @@ const Index = () => {
 
         {weatherData && (
           <div className="space-y-6">
-            <WeatherCard
-              temperature={convertTemperature(weatherData.temperature)}
-              condition={weatherData.condition}
-              humidity={weatherData.humidity}
-              windSpeed={weatherData.windSpeedKmh}
-              location={weatherData.location}
-              isCelsius={isCelsius}
-              localTime={weatherData.localTime}
-              city={weatherData.city}
-              town={weatherData.town}
-              district={weatherData.district}
-              state={weatherData.state}
-              country={weatherData.country}
-              postcode={weatherData.postcode}
-              locationSource={locationSource ?? undefined}
-            />
+            <div className="flex items-center gap-3">
+              <WeatherCard
+                temperature={convertTemperature(weatherData.temperature)}
+                condition={weatherData.condition}
+                humidity={weatherData.humidity}
+                windSpeed={weatherData.windSpeedKmh}
+                location={weatherData.location}
+                isCelsius={isCelsius}
+                localTime={weatherData.localTime}
+                city={weatherData.city}
+                town={weatherData.town}
+                district={weatherData.district}
+                state={weatherData.state}
+                country={weatherData.country}
+                postcode={weatherData.postcode}
+                locationSource={locationSource ?? undefined}
+              />
+            </div>
+            
+            <div className="flex justify-center">
+              <Button 
+                onClick={handleSaveLocation} 
+                variant="outline" 
+                className="gap-2"
+              >
+                <MapPin className="w-4 h-4" />
+                Save This Location
+              </Button>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {aiTipsEnabled && <AITipsCard tips={aiTips} />}
@@ -615,6 +693,49 @@ const Index = () => {
             ))}
           </div>
         </div>
+
+        {/* Saved Locations */}
+        {savedLocations.length > 0 && (
+          <div className="space-y-4 animate-fade-in">
+            <h2 className="text-2xl font-semibold text-foreground">Saved Locations</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {savedLocations.map((loc) => (
+                <Card key={loc.id} className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
+                  <div className="flex items-start justify-between gap-2">
+                    <div 
+                      className="flex-1"
+                      onClick={() => handleLoadSavedLocation(loc)}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <MapPin className="w-4 h-4 text-primary" />
+                        <h3 className="font-semibold text-foreground">{loc.name}</h3>
+                      </div>
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        {loc.district && <p>District: {loc.district}</p>}
+                        {loc.state && <p>State: {loc.state}</p>}
+                        {loc.postcode && <p>PIN: {loc.postcode}</p>}
+                        <p className="text-xs opacity-70">
+                          Saved {new Date(loc.savedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSavedLocation(loc.id);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

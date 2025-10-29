@@ -31,3 +31,16 @@ export type ForecastWithMeta = {
 };
 
 export type GeoResult = { lat: number; lon: number; name?: string; town?: string; district?: string; state?: string; country?: string; postcode?: string };
+
+export type SavedLocation = {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  town?: string;
+  district?: string;
+  state?: string;
+  country?: string;
+  postcode?: string;
+  savedAt: number; // timestamp
+};
