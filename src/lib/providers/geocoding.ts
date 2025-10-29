@@ -12,89 +12,208 @@ export async function forwardGeocode(query: string): Promise<GeoResult | null> {
     lat: item.latitude,
     lon: item.longitude,
     name: item.name,
+    town: item.name,
     state: item.admin1 || item.admin2,
     country: item.country,
   };
 }
 
-// Reverse geocoding with enhanced precision for town/district/pincode
-// Primary: Nominatim with detailed address parsing; Fallback: BigDataCloud
-export async function reverseGeocode(
+// Photon reverse geocoding (Komoot) - Ultra-precise, especially for India/EU
+async function reverseGeocodePhoton(
   lat: number,
   lon: number
-): Promise<{ name?: string; state?: string; country?: string; postcode?: string } | null> {
-  // Try Nominatim first with zoom=18 for maximum detail
+): Promise<Partial<{ name: string; town: string; district: string; state: string; country: string; postcode: string }> | null> {
+  try {
+    const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&lang=en`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "sky-watch-pro/1.0" },
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const props = j?.features?.[0]?.properties;
+    if (!props) return null;
+
+    return {
+      name: props.name || props.locality || props.suburb,
+      town: props.city || props.town || props.village || props.locality || props.suburb || props.name,
+      district: props.district || props.county,
+      state: props.state,
+      country: props.country,
+      postcode: props.postcode,
+    };
+  } catch (err) {
+    if (import.meta.env.DEV) console.warn("Photon reverse error:", err);
+    return null;
+  }
+}
+
+// Nominatim (OSM) reverse geocoding with zoom 18 for maximum detail
+async function reverseGeocodeNominatim(
+  lat: number,
+  lon: number
+): Promise<Partial<{ name: string; town: string; district: string; state: string; country: string; postcode: string }> | null> {
   try {
     const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1&zoom=18`;
-    const nomRes = await fetch(nomUrl, { 
-      headers: { 
-        "User-Agent": "sky-watch-pro/1.0", 
-        Accept: "application/json" 
-      } 
+    const nomRes = await fetch(nomUrl, {
+      headers: {
+        "User-Agent": "sky-watch-pro/1.0",
+        Accept: "application/json",
+      },
     });
-    if (nomRes.ok) {
-      const nom = await nomRes.json();
-      const addr = nom?.address || {};
-      // Enhanced name priority: neighborhood → suburb → municipality → town → village → city
-      // This gives most precise locality
-      const name = 
-        addr.neighbourhood || 
-        addr.suburb || 
-        addr.municipality || 
-        addr.town || 
-        addr.village || 
-        addr.city || 
-        addr.hamlet || 
-        addr.quarter;
-      
-      // Enhanced state/district: Include county/district for better precision
-      const state = 
-        addr.state || 
-        addr.county || 
-        addr.state_district || 
-        addr.region;
-      
-      const country = addr.country || (addr.country_code ? String(addr.country_code).toUpperCase() : undefined);
-      const postcode = addr.postcode;
-      
-      // Only return if we got meaningful data
-      if (name || state || country || postcode) {
-        return { name, state, country, postcode };
-      }
-    }
-  } catch (err) {
-    // Silently fall through to BigDataCloud
-    if (import.meta.env.DEV) console.warn('Nominatim reverse geocode error:', err);
-  }
+    if (!nomRes.ok) return null;
+    const nom = await nomRes.json();
+    const addr = nom?.address || {};
 
-  // Fallback: BigDataCloud reverse geocode with enhanced locality parsing
+    const name =
+      addr.neighbourhood ||
+      addr.suburb ||
+      addr.municipality ||
+      addr.town ||
+      addr.village ||
+      addr.city ||
+      addr.hamlet ||
+      addr.quarter;
+
+    const town = addr.town || addr.village || addr.city || addr.suburb || addr.hamlet || addr.neighbourhood;
+
+    const district = addr.state_district || addr.county || addr.district;
+
+    const state = addr.state || addr.region;
+
+    const country = addr.country || (addr.country_code ? String(addr.country_code).toUpperCase() : undefined);
+
+    const postcode = addr.postcode;
+
+    return { name, town, district, state, country, postcode };
+  } catch (err) {
+    if (import.meta.env.DEV) console.warn("Nominatim reverse error:", err);
+    return null;
+  }
+}
+
+// BigDataCloud reverse geocoding
+async function reverseGeocodeBigDataCloud(
+  lat: number,
+  lon: number
+): Promise<Partial<{ name: string; town: string; district: string; state: string; country: string; postcode: string }> | null> {
   try {
     const bdcUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
     const bdcRes = await fetch(bdcUrl, { headers: { Accept: "application/json" } });
     if (!bdcRes.ok) return null;
     const j = await bdcRes.json();
-    
-    // Enhanced name: prioritize most specific locality available
-    const name = 
-      j.locality || 
-      j.city || 
-      j.localityInfo?.informative?.[0]?.name ||
-      j.principalSubdivisionLocality || 
-      j.localityInfo?.administrative?.[0]?.name;
-    
-    // Enhanced state: Include district/county level
-    const state = 
-      j.principalSubdivision || 
+
+    const name = j.locality || j.city || j.localityInfo?.informative?.[0]?.name || j.principalSubdivisionLocality;
+
+    const town = j.locality || j.city || j.principalSubdivisionLocality;
+
+    let district: string | undefined;
+    try {
+      const admins: Array<{ adminLevel?: number; name?: string; description?: string }> = j.localityInfo?.administrative || [];
+      const candidates = admins.filter((a) => (a.adminLevel === 5 || a.adminLevel === 6) && a.name);
+      district = candidates[0]?.name || admins.find((a) => /district/i.test(String(a.description)))?.name;
+    } catch {
+      // Ignore parsing errors
+    }
+
+    const state =
+      j.principalSubdivision ||
       j.localityInfo?.administrative?.find((x: { adminLevel?: number }) => x.adminLevel === 4)?.name ||
       j.localityInfo?.administrative?.find((x: { adminLevel?: number }) => x.adminLevel === 5)?.name;
-    
+
     const country = j.countryName || j.countryCode;
+
     const postcode = j.postcode || j.postalCode;
-    
-    return { name, state, country, postcode };
+
+    return { name, town, district, state, country, postcode };
   } catch (err) {
-    // Final fallback failed
-    if (import.meta.env.DEV) console.warn('BigDataCloud reverse geocode error:', err);
+    if (import.meta.env.DEV) console.warn("BigDataCloud reverse error:", err);
     return null;
   }
+}
+
+// Normalize common postcode formats; prefer 6-digit Indian PIN when present
+function normalizePostcode(pc?: string): string | undefined {
+  if (!pc) return undefined;
+  const str = String(pc).trim();
+  // Extract 6 consecutive digits (Indian PIN)
+  const m = str.replace(/[^0-9]/g, "").match(/\d{6}/);
+  if (m) return m[0];
+  // Fallback to original if non-empty
+  return str || undefined;
+}
+
+// Overpass API - Try multiple radii to find the nearest postcode
+async function lookupPostcodeViaOverpass(lat: number, lon: number): Promise<string | undefined> {
+  const radii = [600, 1200, 2000, 3000];
+  for (const r of radii) {
+    const query = `
+      [out:json][timeout:15];
+      (
+        node(around:${r},${lat},${lon})["addr:postcode"];
+        way(around:${r},${lat},${lon})["addr:postcode"];
+        relation(around:${r},${lat},${lon})["addr:postcode"];
+      );
+      out tags qt 1;`;
+    try {
+      const res = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+        body: new URLSearchParams({ data: query }).toString(),
+      });
+      if (!res.ok) continue;
+      const j = await res.json();
+      const elements = Array.isArray(j?.elements) ? j.elements : [];
+      for (const el of elements) {
+        const pc = el?.tags?.["addr:postcode"];
+        const norm = normalizePostcode(pc);
+        if (norm) return norm;
+      }
+    } catch {
+      // Continue to next radius
+    }
+  }
+  return undefined;
+}
+
+// Reverse geocoding with multi-source aggregation for better town/district/postcode accuracy
+export async function reverseGeocode(
+  lat: number,
+  lon: number
+): Promise<{
+  name?: string;
+  town?: string;
+  district?: string;
+  state?: string;
+  country?: string;
+  postcode?: string;
+} | null> {
+  // Fetch from Photon, Nominatim, and BigDataCloud in parallel
+  const [photon, nominatim, bdc] = await Promise.allSettled([
+    reverseGeocodePhoton(lat, lon),
+    reverseGeocodeNominatim(lat, lon),
+    reverseGeocodeBigDataCloud(lat, lon),
+  ]);
+
+  const ph = photon.status === "fulfilled" ? photon.value || {} : {};
+  const nm = nominatim.status === "fulfilled" ? nominatim.value || {} : {};
+  const bc = bdc.status === "fulfilled" ? bdc.value || {} : {};
+
+  // Merge strategy: prefer most granular/accurate source per field
+  const name = ph.name || nm.name || bc.name;
+  const town = ph.town || nm.town || bc.town || name;
+  const district = nm.district || ph.district || bc.district;
+  const state = nm.state || ph.state || bc.state;
+  const country = nm.country || ph.country || bc.country;
+
+  // Prefer a valid 6-digit Indian PIN if present; otherwise any; otherwise Overpass
+  const candidates = [ph.postcode, nm.postcode, bc.postcode].map(normalizePostcode).filter(Boolean) as string[];
+  let postcode = candidates.find((x) => /^\d{6}$/.test(x)) || candidates[0];
+  if (!postcode) {
+    postcode = await lookupPostcodeViaOverpass(lat, lon);
+  }
+
+  if (name || town || district || state || country || postcode) {
+    return { name, town, district, state, country, postcode };
+  }
+  return null;
 }

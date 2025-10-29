@@ -11,6 +11,8 @@ interface WeatherCardProps {
   localTime?: string;
   // discrete fields
   city?: string;
+  town?: string;
+  district?: string;
   state?: string;
   country?: string;
   postcode?: string;
@@ -27,6 +29,8 @@ const WeatherCard = ({
   isCelsius,
   localTime,
   city,
+  town,
+  district,
   state,
   country,
   postcode,
@@ -95,12 +99,18 @@ const WeatherCard = ({
         </div>
         {/* Discrete location details */}
         <div className="pt-2 text-sm text-white/90 space-y-1">
-          { (city || state || country) && (
+          { (city || town || state || country) && (
             <div className="flex items-center justify-center gap-2">
               <div className="text-xs text-white/70">Location:</div>
-              <div className="font-medium">{[city, state, country].filter(Boolean).join(', ')}</div>
+              <div className="font-medium">{[town || city, state, country].filter(Boolean).join(', ')}</div>
             </div>
           ) }
+          {district && (
+            <div className="flex items-center justify-center gap-2">
+              <div className="text-xs text-white/70">District:</div>
+              <div className="font-medium">{district}</div>
+            </div>
+          )}
           {postcode && (
             <div className="flex items-center justify-center gap-2">
               <div className="text-xs text-white/70">Postal:</div>

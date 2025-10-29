@@ -7,6 +7,8 @@ export type CurrentWeather = {
   location: string; // e.g., "City/Town, State, Country (PIN)"
   // Discrete fields
   city?: string;
+  town?: string; // more granular locality when available
+  district?: string; // admin district/county
   state?: string;
   country?: string;
   postcode?: string;
@@ -28,4 +30,4 @@ export type ForecastWithMeta = {
   timezoneOffsetSec?: number;
 };
 
-export type GeoResult = { lat: number; lon: number; name?: string; state?: string; country?: string };
+export type GeoResult = { lat: number; lon: number; name?: string; town?: string; district?: string; state?: string; country?: string; postcode?: string };

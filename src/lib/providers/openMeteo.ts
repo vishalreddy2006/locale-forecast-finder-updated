@@ -68,7 +68,8 @@ export async function getCurrentWeather(lat: number, lon: number): Promise<Curre
   }
 
   const rev = await reverseGeocode(lat, lon);
-  const parts = [rev?.name].filter(Boolean) as string[];
+  const displayName = rev?.town || rev?.name;
+  const parts = [displayName].filter(Boolean) as string[];
   if (rev?.state) parts.push(rev.state);
   if (rev?.country) parts.push(rev.country);
   const pinSuffix = rev?.postcode ? ` (${rev.postcode})` : "";
@@ -95,7 +96,9 @@ export async function getCurrentWeather(lat: number, lon: number): Promise<Curre
     humidity,
     windSpeedKmh: windKmh,
     location: `${parts.join(", ")}${pinSuffix}`,
-    city: rev?.name,
+    city: displayName,
+    town: rev?.town,
+    district: rev?.district,
     state: rev?.state,
     country: rev?.country,
     postcode: rev?.postcode,
