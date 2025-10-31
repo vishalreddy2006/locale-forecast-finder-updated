@@ -1,4 +1,4 @@
-import type { CurrentWeather, DailyForecast, ForecastWithMeta } from "../types";
+import type { CurrentWeather, DailyForecast, ForecastWithMeta, HourlyForecast } from "../types";
 import { reverseGeocode } from "./geocoding";
 
 // WMO weather code mapping to human-readable conditions
@@ -39,8 +39,8 @@ function codeToCondition(code?: number): string {
 }
 
 export async function getCurrentWeather(lat: number, lon: number): Promise<CurrentWeather> {
-  // Request current weather and hourly humidity to estimate current humidity
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relativehumidity_2m&timezone=auto`;
+  // Request current weather, hourly data, and daily min/max for today
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relativehumidity_2m&daily=temperature_2m_min,temperature_2m_max&timezone=auto&forecast_days=1`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch current weather (Open-Meteo)");
   const j = await res.json();
@@ -65,6 +65,18 @@ export async function getCurrentWeather(lat: number, lon: number): Promise<Curre
     }
   } catch {
     // Ignore humidity parsing errors; default to 0
+  }
+
+  // Get today's min and max temperature
+  let todayMinTemp: number | undefined;
+  let todayMaxTemp: number | undefined;
+  try {
+    const minTemps: number[] = j.daily?.temperature_2m_min || [];
+    const maxTemps: number[] = j.daily?.temperature_2m_max || [];
+    if (minTemps.length > 0) todayMinTemp = Math.round(Number(minTemps[0]));
+    if (maxTemps.length > 0) todayMaxTemp = Math.round(Number(maxTemps[0]));
+  } catch {
+    // Ignore daily temp parsing errors
   }
 
   const rev = await reverseGeocode(lat, lon);
@@ -105,6 +117,8 @@ export async function getCurrentWeather(lat: number, lon: number): Promise<Curre
     lat,
     lon,
     localTime,
+    todayMinTemp,
+    todayMaxTemp,
   };
 }
 
@@ -131,4 +145,55 @@ export async function getSevenDayForecastWithMeta(lat: number, lon: number): Pro
     timezoneName: j?.timezone,
     timezoneOffsetSec: undefined,
   };
+}
+
+export async function get24HourForecast(lat: number, lon: number): Promise<HourlyForecast[]> {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,weathercode,relativehumidity_2m,windspeed_10m&timezone=auto&forecast_days=2`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch hourly forecast (Open-Meteo)");
+  const j = await res.json();
+  
+  const hourlyData: HourlyForecast[] = [];
+  const times: string[] = j.hourly?.time || [];
+  const temps: number[] = j.hourly?.temperature_2m || [];
+  const codes: number[] = j.hourly?.weathercode || [];
+  const humidity: number[] = j.hourly?.relativehumidity_2m || [];
+  const windSpeed: number[] = j.hourly?.windspeed_10m || [];
+  const timezone = j?.timezone || 'UTC';
+  
+  // Get current hour to start from
+  const now = new Date();
+  
+  for (let i = 0; i < Math.min(24, times.length); i++) {
+    try {
+      const timeStr = times[i];
+      const date = new Date(timeStr);
+      
+      // Skip past hours
+      if (date < now) continue;
+      
+      // Format hour display
+      const hourDisplay = new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        hour12: true,
+        timeZone: timezone
+      }).format(date);
+      
+      hourlyData.push({
+        time: hourDisplay,
+        temperature: Math.round(Number(temps[i] ?? 0)),
+        condition: codeToCondition(Number(codes[i])),
+        humidity: Math.round(Number(humidity[i] ?? 0)),
+        windSpeed: Math.round(Number(windSpeed[i] ?? 0))
+      });
+      
+      // Stop after 24 entries
+      if (hourlyData.length >= 24) break;
+    } catch {
+      // Skip this hour on error
+      continue;
+    }
+  }
+  
+  return hourlyData;
 }

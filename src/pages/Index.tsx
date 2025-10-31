@@ -2,14 +2,15 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import WeatherCard from "@/components/WeatherCard";
 import ForecastCard from "@/components/ForecastCard";
+import HourlyForecastCard from "@/components/HourlyForecastCard";
 import TemperatureToggle from "@/components/TemperatureToggle";
 import SearchBar from "@/components/SearchBar";
 import SettingsPanel from "@/components/SettingsPanel";
 import AITipsCard from "@/components/AITipsCard";
 import AIAnalyzerCard from "@/components/AIAnalyzerCard";
 import { Loader2, MapPin, Trash2 } from "lucide-react";
-import { getCurrentWeather, getSevenDayForecastWithMeta, forwardGeocode, ipGeolocation } from "@/lib/weather";
-import type { CurrentWeather, DailyForecast, SavedLocation } from "@/lib/weather";
+import { getCurrentWeather, getSevenDayForecastWithMeta, get24HourForecast, forwardGeocode, ipGeolocation } from "@/lib/weather";
+import type { CurrentWeather, DailyForecast, SavedLocation, HourlyForecast } from "@/lib/weather";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -46,6 +47,7 @@ const Index = () => {
 
   const [weatherData, setWeatherData] = useState<WeatherData | null>(hyderabadWeather);
   const [forecast, setForecast] = useState<ForecastData[]>(hyderabadForecast);
+  const [hourlyForecast, setHourlyForecast] = useState<HourlyForecast[]>([]);
   const [loading, setLoading] = useState(false);
   const [isCelsius, setIsCelsius] = useState(true);
   const [aiTipsEnabled, setAiTipsEnabled] = useState(false);
@@ -169,9 +171,16 @@ const Index = () => {
         country: current.country,
         postcode: current.postcode,
         localTime: current.localTime,
+        todayMinTemp: current.todayMinTemp,
+        todayMaxTemp: current.todayMaxTemp,
       };
 
       const { days, isFallback, timezoneName, timezoneOffsetSec } = await getSevenDayForecastWithMeta(lat, lon);
+      
+      // Fetch 24-hour forecast
+      const hourly = await get24HourForecast(lat, lon);
+      setHourlyForecast(hourly);
+      
       // Compute a reliable local time string using timezoneName if present
       let localTimeStr: string | undefined = current.localTime;
       try {
@@ -463,8 +472,37 @@ const Index = () => {
                 <div class="label">Wind Speed</div>
                 <div>${weatherData.windSpeedKmh} km/h</div>
               </div>
+              ${(weatherData.todayMinTemp !== undefined && weatherData.todayMaxTemp !== undefined) ? `
+              <div class="item">
+                <div class="label">Today's Min</div>
+                <div>${Math.round(isCelsius ? weatherData.todayMinTemp : (weatherData.todayMinTemp * 9/5) + 32)}°${isCelsius ? 'C' : 'F'}</div>
+              </div>
+              <div class="item">
+                <div class="label">Today's Max</div>
+                <div>${Math.round(isCelsius ? weatherData.todayMaxTemp : (weatherData.todayMaxTemp * 9/5) + 32)}°${isCelsius ? 'C' : 'F'}</div>
+              </div>
+              ` : ''}
             </div>
           </div>
+
+          ${hourlyForecast.length > 0 ? `
+            <h2>24-Hour Forecast</h2>
+            <div style="overflow-x: auto; margin: 20px 0;">
+              <div style="display: flex; gap: 10px; min-width: max-content;">
+                ${hourlyForecast.map(hour => `
+                  <div style="flex-shrink: 0; width: 100px; background: #f1f5f9; padding: 12px; border-radius: 6px; text-align: center;">
+                    <div style="font-weight: 600; color: #2563eb; margin-bottom: 8px; font-size: 13px;">${hour.time}</div>
+                    <div style="font-size: 20px; font-weight: bold; margin-bottom: 8px;">${Math.round(isCelsius ? hour.temperature : (hour.temperature * 9/5) + 32)}°</div>
+                    <div style="font-size: 11px; color: #64748b; margin-bottom: 8px; min-height: 32px;">${hour.condition}</div>
+                    <div style="font-size: 10px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 6px;">
+                      <div>💧 ${hour.humidity}%</div>
+                      <div>💨 ${hour.windSpeed} km/h</div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
 
           <h2>7-Day Forecast</h2>
           <div class="forecast-grid">
@@ -593,8 +631,20 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
+        {/* Beautiful Header with Sky Watch Pro Branding */}
+        <div className="text-center mb-6 animate-fade-in">
+          <div className="flex items-center justify-center gap-3 mb-2">
+            <div className="text-5xl">🌤️</div>
+            <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 bg-clip-text text-transparent">
+              Sky Watch Pro
+            </h1>
+            <div className="text-5xl">⛅</div>
+          </div>
+          <p className="text-muted-foreground text-lg">Your Intelligent Weather Companion</p>
+        </div>
+
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-fade-in">
-          <h1 className="text-4xl font-bold text-foreground">Weather Forecast</h1>
+          <h2 className="text-2xl font-semibold text-foreground">Weather Forecast</h2>
           <div className="flex items-center gap-3">
             <TemperatureToggle isCelsius={isCelsius} onToggle={handleToggle} />
             <SettingsPanel
@@ -645,6 +695,8 @@ const Index = () => {
                 country={weatherData.country}
                 postcode={weatherData.postcode}
                 locationSource={locationSource ?? undefined}
+                todayMinTemp={weatherData.todayMinTemp}
+                todayMaxTemp={weatherData.todayMaxTemp}
               />
             </div>
             
@@ -658,6 +710,11 @@ const Index = () => {
                 Save This Location
               </Button>
             </div>
+
+            {/* 24-Hour Forecast */}
+            {hourlyForecast.length > 0 && (
+              <HourlyForecastCard hourlyData={hourlyForecast} isCelsius={isCelsius} />
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {aiTipsEnabled && <AITipsCard tips={aiTips} />}

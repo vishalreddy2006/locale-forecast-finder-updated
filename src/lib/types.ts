@@ -15,6 +15,8 @@ export type CurrentWeather = {
   lat: number;
   lon: number;
   localTime?: string; // formatted local time string for the location
+  todayMinTemp?: number; // Today's minimum temperature
+  todayMaxTemp?: number; // Today's maximum temperature
 };
 
 export type DailyForecast = {
@@ -31,6 +33,14 @@ export type ForecastWithMeta = {
 };
 
 export type GeoResult = { lat: number; lon: number; name?: string; town?: string; district?: string; state?: string; country?: string; postcode?: string };
+
+export type HourlyForecast = {
+  time: string; // Hour display like "2 PM", "3 PM"
+  temperature: number;
+  condition: string;
+  humidity: number;
+  windSpeed: number;
+};
 
 export type SavedLocation = {
   id: string;

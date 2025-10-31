@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { Cloud, CloudRain, Sun, Wind, Droplets } from "lucide-react";
+import { Cloud, CloudRain, Sun, Wind, Droplets, ThermometerSun, ThermometerSnowflake } from "lucide-react";
 
 interface WeatherCardProps {
   temperature: number;
@@ -18,6 +18,8 @@ interface WeatherCardProps {
   postcode?: string;
   // where the coords came from: 'geolocation' | 'ip' | 'search' | 'saved'
   locationSource?: string;
+  todayMinTemp?: number;
+  todayMaxTemp?: number;
 }
 
 const WeatherCard = ({ 
@@ -35,7 +37,12 @@ const WeatherCard = ({
   country,
   postcode,
   locationSource,
+  todayMinTemp,
+  todayMaxTemp,
 }: WeatherCardProps) => {
+  const convertTemperature = (temp: number) => {
+    return isCelsius ? temp : Math.round((temp * 9/5) + 32);
+  };
   const getWeatherIcon = () => {
     const conditionLower = condition.toLowerCase();
     if (conditionLower.includes('rain')) {
@@ -79,6 +86,18 @@ const WeatherCard = ({
           <div className="text-7xl font-bold mb-2">
             {Math.round(temperature)}°{isCelsius ? 'C' : 'F'}
           </div>
+          {(todayMinTemp !== undefined && todayMaxTemp !== undefined) && (
+            <div className="flex items-center justify-center gap-4 mt-3 text-white/90">
+              <div className="flex items-center gap-1">
+                <ThermometerSnowflake className="w-4 h-4" />
+                <span className="text-sm">Min: {convertTemperature(todayMinTemp)}°</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <ThermometerSun className="w-4 h-4" />
+                <span className="text-sm">Max: {convertTemperature(todayMaxTemp)}°</span>
+              </div>
+            </div>
+          )}
         </div>
         
         <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/20">
